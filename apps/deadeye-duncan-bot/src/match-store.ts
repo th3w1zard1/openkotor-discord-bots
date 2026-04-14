@@ -22,20 +22,30 @@ type SerializedMatch = Omit<PazaakMatch, "players"> & {
   players: [SerializedPlayerState, SerializedPlayerState];
 };
 
+const serializePlayer = (player: MatchPlayerState): SerializedPlayerState => ({
+  ...player,
+  usedCardIds: [...player.usedCardIds],
+});
+
+const deserializePlayer = (data: SerializedPlayerState): MatchPlayerState => ({
+  ...data,
+  usedCardIds: new Set(data.usedCardIds),
+  // Ensure defaults for fields added after initial schema.
+  sideDeck: data.sideDeck ?? [],
+  hasTiebreaker: data.hasTiebreaker ?? false,
+});
+
 const serializeMatch = (match: PazaakMatch): SerializedMatch => ({
   ...match,
-  players: [
-    { ...match.players[0]!, usedCardIds: [...match.players[0]!.usedCardIds] },
-    { ...match.players[1]!, usedCardIds: [...match.players[1]!.usedCardIds] },
-  ],
+  players: [serializePlayer(match.players[0]!), serializePlayer(match.players[1]!)],
 });
 
 const deserializeMatch = (data: SerializedMatch): PazaakMatch => ({
   ...data,
-  players: [
-    { ...data.players[0]!, usedCardIds: new Set(data.players[0]!.usedCardIds) },
-    { ...data.players[1]!, usedCardIds: new Set(data.players[1]!.usedCardIds) },
-  ],
+  players: [deserializePlayer(data.players[0]!), deserializePlayer(data.players[1]!)],
+  // Ensure defaults for fields added after initial schema.
+  initialStarterIndex: data.initialStarterIndex ?? 0,
+  lastSetWinnerIndex: data.lastSetWinnerIndex ?? null,
 });
 
 // ---------------------------------------------------------------------------

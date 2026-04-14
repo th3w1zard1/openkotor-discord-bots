@@ -27,43 +27,52 @@ Pazaak is from KOTOR. These are the canonical KOTOR-flavored house rules in use 
 ### Match Structure
 
 - First player to **win 3 sets** wins the match and collects the wager.
-- A **tie** (both players stand on the same total in the same set) plays another set without
-  refreshing side-deck hands.
+- A **tie** (both players stand on the same total in the same set) plays another set with
+  fresh side-deck hands — unless exactly one player has played a Tiebreaker card, in which
+  case that player wins the set.
+- The loser of a set goes first in the next set. On a tie, the original coin-flip opener resumes.
+  First set opener is random.
 
 ### Sets
 
 Within each set:
 - Players aim to get their board total as close to **20** as possible without going over.
-- Going over 20 is a **bust** — that player loses the set immediately.
-- Reaching exactly **9 cards** triggers an **auto-stand**.
+- Going over 20 on a draw is an immediate **bust** — that player loses the set with no chance to
+  play a side card. Going over 20 from a side card play is also an immediate bust.
+- Filling all **9 board slots** without busting wins the set automatically.
 
 ### Decks
 
 | Deck | Contents |
 |---|---|
 | Main deck | Four copies of cards 1 through 10 (40 cards total) |
-| Side deck | Each player draws 4 random side cards at the start of the match |
+| Sideboard | Each player receives a random 10-card sideboard at match start |
+| Hand | 4 cards drawn from the sideboard each set (always refreshed, including on ties) |
 
-Side cards range from −6 through +6 in fixed or flexible (±) variants:
+Side cards include:
 
-| Type | Behavior |
-|---|---|
-| Fixed positive (`+4`, `+5`, `+6`) | Always adds the stated value |
-| Fixed negative (`−4`, `−5`, `−6`) | Always subtracts the stated value |
-| Flex (`+/−1`, `+/−2`, `+/−3`, `+/−6`) | Player chooses + or − at play time |
+| Type | Variants | Behavior |
+|---|---|---|
+| Plus (`+1`…`+6`) | Fixed positive | Always adds the stated value |
+| Minus (`-1`…`-6`) | Fixed negative | Always subtracts the stated value |
+| Flip (`±1`…`±6`) | Toggleable | Player chooses + or − at play time |
+| Tiebreaker (`T+1`) | Special | Always adds +1; wins tied sets |
+| Double (`x2`) | Special | Doubles the value of the last basic board card (main/plus/minus/flip only) |
+| Flip 2&4 | Special | Flips the sign of all main-deck, plus, and minus 2s and 4s on the board |
+| Flip 3&6 | Special | Flips the sign of all main-deck, plus, and minus 3s and 6s on the board |
 
 ### Turn Flow
 
-1. Player draws a card from the main deck (or stands to end.
-2. After a draw, the player may optionally play one side card from their hand.
-3. Side cards can be played only once per match.
-4. When done, the player banks the total and the turn passes to the opponent.
-5. If the final total exceeds 20, the player busts and loses the set.
+1. Player draws a card from the main deck (mandatory — must draw before standing).
+2. If the draw puts the total over 20, the player busts immediately (no recovery).
+3. Otherwise, the player may optionally play one side card, then stand or end the turn.
+4. Playing a side card does not end the turn — the player still chooses to stand or end turn afterward.
+5. Side cards can be played only once per set; one card maximum per turn.
+6. If a side card puts the total over 20, the player busts immediately.
 
-### Nine-Card Auto-Stand
+### Nine-Card Auto-Win
 
-If a player's board reaches 9 cards, they automatically stand on whatever total they hold. This
-prevents infinite draw loops.
+If a player fills all 9 board slots without busting, they win the set automatically.
 
 ## Commands
 
@@ -161,25 +170,21 @@ value. There is no cashout, no external marketplace, and no convertible rate.
 
 | Variable | Default | Description |
 |---|---|---|
-| `DEADEYE_DATA_DIR` | `data/deadeye-duncan` | Directory for wallet JSON storage |
+| `DEADEYE_DATA_DIR` | `data/deadeye-duncan` | Directory for wallet and match JSON storage |
 | `DEADEYE_STARTING_CREDITS` | `1000` | Credit balance for first-time players |
 | `DEADEYE_DAILY_BONUS` | `200` | Credits awarded per daily claim |
 | `DEADEYE_DAILY_COOLDOWN_MS` | `86400000` | Daily cooldown in milliseconds |
+| `DEADEYE_TURN_TIMEOUT_MS` | `300000` | Turn timeout before auto-forfeit (5 minutes) |
 
 ## Current Limitations
 
-- Active match state is held in **memory only**. A process restart clears all games in progress
-  without settlement. Disk-backed match snapshotting is the next persistence phase.
 - The `Rematch` button uses player IDs embedded in the custom ID string. The names shown in the
   rematch challenge embed are pulled from the wallet file, so they reflect the last recorded
   display name.
-- There is no turn timer yet. Inactive players can stall a match indefinitely.
+- There is no deck-building UI. Players receive a random 10-card sideboard per match.
 
 ## Next Phase
 
-- Persist active match state to disk so restarts do not clear live games.
-- Add a turn timer (configurable via environment variable) that auto-forfeits inactive players.
-- Add a `rivalry` subcommand to inspect head-to-head records against a specific opponent.
-- Add streak bonuses (e.g. +50 credits per win on a 5+ streak).
 - Add a `spectate` subcommand that shows the current board as an updated embed in a separate
   message.
+- Add deck-building interaction (modal or multi-step) to let players pick their 10-card sideboard.

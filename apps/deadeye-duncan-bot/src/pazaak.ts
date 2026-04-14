@@ -1,12 +1,25 @@
 import { randomUUID } from "node:crypto";
 
-export type SideCardMode = "fixed" | "flex";
+// ---------------------------------------------------------------------------
+// Card type system — matches HoloPazaak (PyQt6) canonical types.
+// ---------------------------------------------------------------------------
+
+export type SideCardType =
+  | "plus"             // Fixed positive (+1 to +6)
+  | "minus"            // Fixed negative (−1 to −6)
+  | "flip"             // Toggleable ± (±1 to ±6)
+  | "double"           // Doubles value of last board card
+  | "tiebreaker"       // Always +1, wins ties
+  | "flip_two_four"    // Flips the sign of all 2s and 4s on the board
+  | "flip_three_six"   // Flips the sign of all 3s and 6s on the board
+  | "plus_minus_3_6";  // Asymmetric +3/−6 (KOTOR 1)
 
 export interface SideCard {
   id: string;
   label: string;
+  /** Unsigned magnitude for plus/minus/flip/tiebreaker; 0 for effect-only cards. */
   value: number;
-  mode: SideCardMode;
+  type: SideCardType;
 }
 
 export interface SideCardOption {
@@ -21,16 +34,35 @@ export interface AppliedSideCard {
   appliedValue: number;
 }
 
+/** A single card sitting on a player's board (main-deck draw or played side card). */
+export interface BoardCard {
+  value: number;
+  frozen: boolean;
+  /** Origin card type — undefined for main-deck draws. Used for double-card targeting. */
+  source?: SideCardType;
+}
+
+export const SIDE_DECK_SIZE = 10;
+export const HAND_SIZE = 4;
+export const MAX_BOARD_SIZE = 9;
+export const WIN_SCORE = 20;
+export const SETS_TO_WIN = 3;
+
 export interface MatchPlayerState {
   userId: string;
   displayName: string;
   roundWins: number;
+  /** 10-card sideboard drawn once per match. */
+  sideDeck: SideCard[];
+  /** 4-card hand drawn from sideDeck each set. */
   hand: SideCard[];
   usedCardIds: Set<string>;
-  board: number[];
+  board: BoardCard[];
   sideCardsPlayed: AppliedSideCard[];
   total: number;
   stood: boolean;
+  /** True if a Tiebreaker card has been played this set. */
+  hasTiebreaker: boolean;
 }
 
 export interface PendingChallenge {
@@ -54,13 +86,17 @@ export interface PazaakMatch {
   activePlayerIndex: number;
   setNumber: number;
   mainDeck: number[];
-  phase: "turn" | "after-draw" | "completed";
+  phase: "turn" | "after-draw" | "after-card" | "completed";
   pendingDraw: number | null;
   statusLine: string;
   createdAt: number;
   updatedAt: number;
   /** Timestamp when the current active player's decision window opened. Reset on every action. */
   turnStartedAt: number;
+  /** Index of the player who opens the first set (random). */
+  initialStarterIndex: number;
+  /** Index of the player who won the most recent set (null before any set resolves or on tie). */
+  lastSetWinnerIndex: number | null;
   winnerId: string | null;
   winnerName: string | null;
   loserId: string | null;
@@ -78,17 +114,37 @@ export interface MatchPersistence {
   loadActive(maxAgeMs: number): Promise<PazaakMatch[]>;
 }
 
-const sideDeckLibrary: readonly SideCard[] = [
-  { id: "pm1", label: "+/-1", value: 1, mode: "flex" },
-  { id: "pm2", label: "+/-2", value: 2, mode: "flex" },
-  { id: "pm3", label: "+/-3", value: 3, mode: "flex" },
-  { id: "pm6", label: "+/-6", value: 6, mode: "flex" },
-  { id: "plus4", label: "+4", value: 4, mode: "fixed" },
-  { id: "minus4", label: "-4", value: -4, mode: "fixed" },
-  { id: "plus5", label: "+5", value: 5, mode: "fixed" },
-  { id: "minus5", label: "-5", value: -5, mode: "fixed" },
-  { id: "plus6", label: "+6", value: 6, mode: "fixed" },
-  { id: "minus6", label: "-6", value: -6, mode: "fixed" },
+// ---------------------------------------------------------------------------
+// Card pool — full KOTOR / TSL canonical side-card catalogue.
+// ---------------------------------------------------------------------------
+
+const sideCardTemplates: readonly SideCard[] = [
+  // Plus cards (+1 through +6)
+  { id: "plus1", label: "+1", value: 1, type: "plus" },
+  { id: "plus2", label: "+2", value: 2, type: "plus" },
+  { id: "plus3", label: "+3", value: 3, type: "plus" },
+  { id: "plus4", label: "+4", value: 4, type: "plus" },
+  { id: "plus5", label: "+5", value: 5, type: "plus" },
+  { id: "plus6", label: "+6", value: 6, type: "plus" },
+  // Minus cards (−1 through −6)
+  { id: "minus1", label: "-1", value: 1, type: "minus" },
+  { id: "minus2", label: "-2", value: 2, type: "minus" },
+  { id: "minus3", label: "-3", value: 3, type: "minus" },
+  { id: "minus4", label: "-4", value: 4, type: "minus" },
+  { id: "minus5", label: "-5", value: 5, type: "minus" },
+  { id: "minus6", label: "-6", value: 6, type: "minus" },
+  // Flip cards (±1 through ±6)
+  { id: "flip1", label: "±1", value: 1, type: "flip" },
+  { id: "flip2", label: "±2", value: 2, type: "flip" },
+  { id: "flip3", label: "±3", value: 3, type: "flip" },
+  { id: "flip4", label: "±4", value: 4, type: "flip" },
+  { id: "flip5", label: "±5", value: 5, type: "flip" },
+  { id: "flip6", label: "±6", value: 6, type: "flip" },
+  // Special cards
+  { id: "double", label: "x2", value: 0, type: "double" },
+  { id: "tiebreaker", label: "T+1", value: 1, type: "tiebreaker" },
+  { id: "flip24", label: "Flip 2&4", value: 0, type: "flip_two_four" },
+  { id: "flip36", label: "Flip 3&6", value: 0, type: "flip_three_six" },
 ] as const;
 
 const shuffle = <T>(items: readonly T[]): T[] => {
@@ -104,8 +160,21 @@ const shuffle = <T>(items: readonly T[]): T[] => {
 
 const cloneCard = (card: SideCard): SideCard => ({ ...card });
 
-const drawMatchHand = (): SideCard[] => {
-  return shuffle(sideDeckLibrary).slice(0, 4).map(cloneCard);
+/** Build a 10-card sideboard for one player, drawn from the full card pool. */
+const drawSideDeck = (): SideCard[] => {
+  const deck: SideCard[] = [];
+
+  for (let i = 0; i < SIDE_DECK_SIZE; i += 1) {
+    const template = sideCardTemplates[Math.floor(Math.random() * sideCardTemplates.length)]!;
+    deck.push({ ...template, id: `${template.id}_${i}` });
+  }
+
+  return deck;
+};
+
+/** Draw HAND_SIZE cards from the sideboard for one set. */
+const drawHandFromSideDeck = (sideDeck: SideCard[]): SideCard[] => {
+  return shuffle(sideDeck).slice(0, HAND_SIZE).map(cloneCard);
 };
 
 const buildMainDeck = (): number[] => {
@@ -121,16 +190,19 @@ const buildMainDeck = (): number[] => {
 };
 
 const createPlayerState = (userId: string, displayName: string): MatchPlayerState => {
+  const sideDeck = drawSideDeck();
   return {
     userId,
     displayName,
     roundWins: 0,
-    hand: drawMatchHand(),
+    sideDeck,
+    hand: drawHandFromSideDeck(sideDeck),
     usedCardIds: new Set<string>(),
     board: [],
     sideCardsPlayed: [],
     total: 0,
     stood: false,
+    hasTiebreaker: false,
   };
 };
 
@@ -155,7 +227,12 @@ export const getOpponentForUser = (match: PazaakMatch, userId: string): MatchPla
 };
 
 export const renderBoardLine = (player: MatchPlayerState): string => {
-  return player.board.length > 0 ? `${player.board.join(" + ")} = **${player.total}**` : "No cards in play";
+  if (player.board.length === 0) return "No cards in play";
+  const parts = player.board.map((card, i) => {
+    if (i === 0) return `${card.value}`;
+    return card.value >= 0 ? `+ ${card.value}` : `− ${Math.abs(card.value)}`;
+  });
+  return `${parts.join(" ")} = **${player.total}**`;
 };
 
 export const renderHandLine = (player: MatchPlayerState): string => {
@@ -175,35 +252,95 @@ export const getSideCardOptionsForPlayer = (player: MatchPlayerState): SideCardO
       continue;
     }
 
-    if (card.mode === "fixed") {
-      options.push({
-        cardId: card.id,
-        displayLabel: `Play ${formatSignedValue(card.value)}`,
-        appliedValue: card.value,
-      });
-      continue;
-    }
+    switch (card.type) {
+      case "plus":
+        options.push({
+          cardId: card.id,
+          displayLabel: `Play +${card.value}`,
+          appliedValue: card.value,
+        });
+        break;
 
-    options.push({
-      cardId: card.id,
-      displayLabel: `Play +${card.value}`,
-      appliedValue: card.value,
-    });
-    options.push({
-      cardId: card.id,
-      displayLabel: `Play -${card.value}`,
-      appliedValue: -card.value,
-    });
+      case "minus":
+        options.push({
+          cardId: card.id,
+          displayLabel: `Play -${card.value}`,
+          appliedValue: -card.value,
+        });
+        break;
+
+      case "flip":
+        options.push({
+          cardId: card.id,
+          displayLabel: `Play +${card.value}`,
+          appliedValue: card.value,
+        });
+        options.push({
+          cardId: card.id,
+          displayLabel: `Play -${card.value}`,
+          appliedValue: -card.value,
+        });
+        break;
+
+      case "tiebreaker":
+        options.push({
+          cardId: card.id,
+          displayLabel: "Play T+1",
+          appliedValue: 1,
+        });
+        break;
+
+      case "double": {
+        // Match double-card targeting: last MAIN/PLUS/MINUS/FLIP card only.
+        let targetCard: BoardCard | undefined;
+        for (let i = player.board.length - 1; i >= 0; i--) {
+          const src = player.board[i]!.source;
+          if (src === undefined || src === "plus" || src === "minus" || src === "flip") {
+            targetCard = player.board[i]!;
+            break;
+          }
+        }
+        if (targetCard) {
+          options.push({
+            cardId: card.id,
+            displayLabel: `Play x2 (${targetCard.value}→${targetCard.value * 2})`,
+            appliedValue: targetCard.value,
+          });
+        }
+        break;
+      }
+
+      case "flip_two_four":
+        options.push({
+          cardId: card.id,
+          displayLabel: "Play Flip 2&4",
+          appliedValue: 0,
+        });
+        break;
+
+      case "flip_three_six":
+        options.push({
+          cardId: card.id,
+          displayLabel: "Play Flip 3&6",
+          appliedValue: 0,
+        });
+        break;
+    }
   }
 
   return options;
 };
 
+/** Reset board state for a new set.  A fresh hand is always drawn from the sideboard. */
 const resetPlayerForSet = (player: MatchPlayerState): void => {
   player.board = [];
   player.sideCardsPlayed = [];
   player.total = 0;
   player.stood = false;
+  player.hasTiebreaker = false;
+
+  player.hand = drawHandFromSideDeck(player.sideDeck);
+  player.usedCardIds = new Set<string>();
 };
 
 export class PazaakCoordinator {
@@ -295,24 +432,28 @@ export class PazaakCoordinator {
 
     this.pendingChallenges.delete(challengeId);
 
+    const initialStarterIndex = Math.random() < 0.5 ? 0 : 1;
+    const p1 = createPlayerState(challenge.challengerId, challenge.challengerName);
+    const p2 = createPlayerState(challenge.challengedId, challenge.challengedName);
+    const starter = initialStarterIndex === 0 ? p1 : p2;
+
     const match: PazaakMatch = {
       id: randomUUID(),
       channelId: challenge.channelId,
       publicMessageId: null,
       wager: challenge.wager,
-      players: [
-        createPlayerState(challenge.challengerId, challenge.challengerName),
-        createPlayerState(challenge.challengedId, challenge.challengedName),
-      ],
-      activePlayerIndex: 0,
+      players: [p1, p2],
+      activePlayerIndex: initialStarterIndex,
       setNumber: 1,
       mainDeck: buildMainDeck(),
       phase: "turn",
       pendingDraw: null,
-      statusLine: `${challenge.challengerName} opens set 1.`,
+      statusLine: `${starter.displayName} opens set 1.`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       turnStartedAt: Date.now(),
+      initialStarterIndex,
+      lastSetWinnerIndex: null,
       winnerId: null,
       winnerName: null,
       loserId: null,
@@ -366,28 +507,32 @@ export class PazaakCoordinator {
       throw new Error("Standing players cannot draw additional cards.");
     }
 
-    const drawnCard = match.mainDeck.pop();
+    let drawnCard = match.mainDeck.pop();
 
     if (drawnCard === undefined) {
-      throw new Error("The main deck was exhausted unexpectedly.");
+      // Replenish the deck (matches HoloPazaak: _build_main_deck when empty).
+      match.mainDeck = buildMainDeck();
+      drawnCard = match.mainDeck.pop()!;
     }
 
-    player.board.push(drawnCard);
+    player.board.push({ value: drawnCard, frozen: false });
     player.total += drawnCard;
     match.pendingDraw = drawnCard;
-    match.phase = "after-draw";
     match.statusLine = `${player.displayName} draws ${drawnCard}.`;
     match.updatedAt = Date.now();
     match.turnStartedAt = Date.now();
 
-    const recoveryAvailable = getSideCardOptionsForPlayer(player).some(
-      (option) => player.total + option.appliedValue <= 20,
-    );
-
-    if (player.total > 20 && !recoveryAvailable) {
+    // Bust check — immediate loss, no recovery window (matches HoloPazaak engine).
+    if (player.total > WIN_SCORE) {
       return this.resolveBust(match, playerIndex, `${player.displayName} busts with ${player.total}.`);
     }
 
+    // Nine-card rule: filling the board without busting wins the set automatically.
+    if (player.board.length >= MAX_BOARD_SIZE) {
+      return this.resolveNineCardWin(match, playerIndex);
+    }
+
+    match.phase = "after-draw";
     this.safePersist(match);
     return match;
   }
@@ -396,8 +541,8 @@ export class PazaakCoordinator {
     const match = this.getRequiredMatch(matchId);
     const playerIndex = this.requireTurnOwner(match, userId);
 
-    if (match.phase !== "turn") {
-      throw new Error("You cannot stand while a draw is still being resolved.");
+    if (match.phase !== "after-draw" && match.phase !== "after-card") {
+      throw new Error("You must draw before you can stand.");
     }
 
     const player = playerAt(match, playerIndex);
@@ -424,7 +569,7 @@ export class PazaakCoordinator {
     const playerIndex = this.requireTurnOwner(match, userId);
     const player = playerAt(match, playerIndex);
 
-    if (match.phase !== "after-draw") {
+    if (match.phase !== "after-draw" && match.phase !== "after-card") {
       throw new Error("There is no pending draw to end yet.");
     }
 
@@ -447,30 +592,100 @@ export class PazaakCoordinator {
     }
 
     if (player.usedCardIds.has(card.id)) {
-      throw new Error("That side card has already been spent this match.");
+      throw new Error("That side card has already been spent this set.");
     }
 
-    if (card.mode === "fixed" && card.value !== appliedValue) {
-      throw new Error("Fixed side cards can only be played at their printed value.");
-    }
-
-    if (card.mode === "flex" && Math.abs(appliedValue) !== card.value) {
-      throw new Error("Flexible side cards can only be played at their printed magnitude.");
+    // --- Validate the applied value per card type ---
+    switch (card.type) {
+      case "plus":
+        if (appliedValue !== card.value) throw new Error("Plus cards can only be played at their printed value.");
+        break;
+      case "minus":
+        if (appliedValue !== -card.value) throw new Error("Minus cards can only be played at their printed negative value.");
+        break;
+      case "flip":
+        if (Math.abs(appliedValue) !== card.value) throw new Error("This card can only be played at its printed magnitude.");
+        break;
+      case "tiebreaker":
+        if (appliedValue !== card.value) throw new Error("Tiebreaker can only be played as a positive value.");
+        break;
+      case "double":
+      case "flip_two_four":
+      case "flip_three_six":
+        // appliedValue is computed by the engine, not user-chosen.
+        break;
+      case "plus_minus_3_6":
+        if (appliedValue !== 3 && appliedValue !== -6) throw new Error("This card can only be played as +3 or −6.");
+        break;
     }
 
     player.usedCardIds.add(card.id);
-    player.sideCardsPlayed.push({
-      cardId: card.id,
-      label: card.label,
-      appliedValue,
-    });
-    player.total += appliedValue;
 
-    return this.finishTurn(
-      match,
-      playerIndex,
-      `${player.displayName} plays ${formatSignedValue(appliedValue)} from the side deck.`,
-    );
+    // --- Apply the card effect ---
+    let summary: string;
+
+    if (card.type === "double") {
+      // Double targets the last MAIN/PLUS/MINUS/FLIP card (skips tiebreaker, plus_minus_3_6).
+      let targetIndex = -1;
+      for (let i = player.board.length - 1; i >= 0; i--) {
+        const src = player.board[i]!.source;
+        if (src === undefined || src === "plus" || src === "minus" || src === "flip") {
+          targetIndex = i;
+          break;
+        }
+      }
+      if (targetIndex === -1) throw new Error("No valid board card to double.");
+      const target = player.board[targetIndex]!;
+      const bonusValue = target.value;
+      target.value *= 2;
+      player.total += bonusValue;
+      player.sideCardsPlayed.push({ cardId: card.id, label: card.label, appliedValue: bonusValue });
+      summary = `${player.displayName} plays x2 — card doubled (${bonusValue}→${target.value}).`;
+    } else if (card.type === "flip_two_four" || card.type === "flip_three_six") {
+      const targets = card.type === "flip_two_four" ? [2, 4] : [3, 6];
+      let totalDelta = 0;
+      for (const boardCard of player.board) {
+        // Only MAIN/PLUS/MINUS cards are affected (matches HoloPazaak apply_flip_card_effect).
+        const src = boardCard.source;
+        const isFlippable = src === undefined || src === "plus" || src === "minus";
+        if (!boardCard.frozen && isFlippable && targets.includes(Math.abs(boardCard.value))) {
+          const oldVal = boardCard.value;
+          boardCard.value = -boardCard.value;
+          totalDelta += boardCard.value - oldVal;
+        }
+      }
+      player.total += totalDelta;
+      player.sideCardsPlayed.push({ cardId: card.id, label: card.label, appliedValue: totalDelta });
+      const targetLabel = card.type === "flip_two_four" ? "2&4" : "3&6";
+      summary = `${player.displayName} plays Flip ${targetLabel} — board adjusted by ${formatSignedValue(totalDelta)}.`;
+    } else {
+      // Regular value card: plus, minus, flip, tiebreaker, plus_minus_3_6
+      if (card.type === "tiebreaker") {
+        player.hasTiebreaker = true;
+      }
+      player.board.push({ value: appliedValue, frozen: false, source: card.type });
+      player.total += appliedValue;
+      player.sideCardsPlayed.push({ cardId: card.id, label: card.label, appliedValue });
+      summary = `${player.displayName} plays ${formatSignedValue(appliedValue)} from the side deck.`;
+    }
+
+    // Bust check after side card.
+    if (player.total > WIN_SCORE) {
+      return this.resolveBust(match, playerIndex, `${summary} ${player.displayName} busts with ${player.total}.`);
+    }
+
+    // Nine-card rule after side card.
+    if (player.board.length >= MAX_BOARD_SIZE) {
+      return this.resolveNineCardWin(match, playerIndex);
+    }
+
+    // Player can still stand or end turn (matches HoloPazaak: card play does not auto-end the turn).
+    match.phase = "after-card";
+    match.statusLine = summary;
+    match.updatedAt = Date.now();
+    match.turnStartedAt = Date.now();
+    this.safePersist(match);
+    return match;
   }
 
   public forfeit(matchId: string, userId: string): PazaakMatch {
@@ -490,8 +705,13 @@ export class PazaakCoordinator {
   private finishTurn(match: PazaakMatch, playerIndex: number, summary: string): PazaakMatch {
     const player = playerAt(match, playerIndex);
 
-    if (player.total > 20) {
+    if (player.total > WIN_SCORE) {
       return this.resolveBust(match, playerIndex, `${summary} ${player.displayName} still busts with ${player.total}.`);
+    }
+
+    // Nine-card rule: filling the board without busting wins the set automatically.
+    if (player.board.length >= MAX_BOARD_SIZE) {
+      return this.resolveNineCardWin(match, playerIndex);
     }
 
     const nextIndex = this.pickNextActiveIndex(match, playerIndex);
@@ -514,8 +734,9 @@ export class PazaakCoordinator {
     const winner = playerAt(match, winnerIndex);
     const bustedPlayer = playerAt(match, bustedPlayerIndex);
     winner.roundWins += 1;
+    match.lastSetWinnerIndex = winnerIndex;
 
-    if (winner.roundWins >= 3) {
+    if (winner.roundWins >= SETS_TO_WIN) {
       return this.completeMatch(
         match,
         winnerIndex,
@@ -523,13 +744,45 @@ export class PazaakCoordinator {
       );
     }
 
-    const upcomingSet = match.setNumber + 1;
-    const starterIndex = (upcomingSet - 1) % 2;
+    // Loser opens the next set (HoloPazaak rule).
+    const starterIndex = bustedPlayerIndex;
     const starter = playerAt(match, starterIndex);
+    const upcomingSet = match.setNumber + 1;
     return this.startSet(
       match,
       true,
+      starterIndex,
       `${summary} ${winner.displayName} takes the set. ${starter.displayName} opens set ${upcomingSet}.`,
+    );
+  }
+
+  /** Nine-card rule: filling the board without busting is an automatic set win. */
+  private resolveNineCardWin(match: PazaakMatch, playerIndex: number): PazaakMatch {
+    const winner = playerAt(match, playerIndex);
+    const opponentIndex = this.getOpponentIndex(playerIndex);
+    const loser = playerAt(match, opponentIndex);
+    winner.roundWins += 1;
+    match.lastSetWinnerIndex = playerIndex;
+
+    const summary = `${winner.displayName} fills the board with ${MAX_BOARD_SIZE} cards (total ${winner.total}) — automatic set win!`;
+
+    if (winner.roundWins >= SETS_TO_WIN) {
+      return this.completeMatch(
+        match,
+        playerIndex,
+        `${summary} ${winner.displayName} wins the match ${winner.roundWins}-${loser.roundWins}.`,
+      );
+    }
+
+    // Loser opens the next set.
+    const starterIndex = opponentIndex;
+    const starter = playerAt(match, starterIndex);
+    const upcomingSet = match.setNumber + 1;
+    return this.startSet(
+      match,
+      true,
+      starterIndex,
+      `${summary} ${starter.displayName} opens set ${upcomingSet}.`,
     );
   }
 
@@ -538,41 +791,71 @@ export class PazaakCoordinator {
     const challenged = playerAt(match, 1);
 
     if (challenger.total === challenged.total) {
+      // Tiebreaker resolution: if exactly one player has played a Tiebreaker card, they win.
+      const p0Tie = challenger.hasTiebreaker;
+      const p1Tie = challenged.hasTiebreaker;
+
+      if (p0Tie && !p1Tie) {
+        // Player 0 wins via tiebreaker.
+        return this.resolveSetWinner(match, 0, `${challenger.displayName} breaks the tie at ${challenger.total} with a Tiebreaker card!`);
+      }
+
+      if (p1Tie && !p0Tie) {
+        // Player 1 wins via tiebreaker.
+        return this.resolveSetWinner(match, 1, `${challenged.displayName} breaks the tie at ${challenged.total} with a Tiebreaker card!`);
+      }
+
+      // True tie — no set awarded. HoloPazaak reverts opener to the coin-flip player.
+      const starterIndex = match.initialStarterIndex;
       const upcomingSet = match.setNumber + 1;
-      const starterIndex = (upcomingSet - 1) % 2;
       const starter = playerAt(match, starterIndex);
       return this.startSet(
         match,
         true,
+        starterIndex,
         `Set tied at ${challenger.total}. ${starter.displayName} opens set ${upcomingSet}.`,
       );
     }
 
     const winnerIndex = challenger.total > challenged.total ? 0 : 1;
+    const suffix = `${playerAt(match, winnerIndex).displayName} wins the set ${playerAt(match, winnerIndex).total}-${playerAt(match, this.getOpponentIndex(winnerIndex)).total}.`;
+    return this.resolveSetWinner(match, winnerIndex, suffix);
+  }
+
+  /** Common path: a player definitively wins a set (not a tie). */
+  private resolveSetWinner(match: PazaakMatch, winnerIndex: number, summary: string): PazaakMatch {
     const loserIndex = this.getOpponentIndex(winnerIndex);
     const winner = playerAt(match, winnerIndex);
     const loser = playerAt(match, loserIndex);
     winner.roundWins += 1;
+    match.lastSetWinnerIndex = winnerIndex;
 
-    if (winner.roundWins >= 3) {
+    if (winner.roundWins >= SETS_TO_WIN) {
       return this.completeMatch(
         match,
         winnerIndex,
-        `${winner.displayName} wins the final set and takes the match ${winner.roundWins}-${loser.roundWins}.`,
+        `${summary} ${winner.displayName} takes the match ${winner.roundWins}-${loser.roundWins}.`,
       );
     }
 
-    const upcomingSet = match.setNumber + 1;
-    const starterIndex = (upcomingSet - 1) % 2;
+    // Loser opens the next set (HoloPazaak rule).
+    const starterIndex = loserIndex;
     const starter = playerAt(match, starterIndex);
+    const upcomingSet = match.setNumber + 1;
     return this.startSet(
       match,
       true,
-      `${winner.displayName} takes the set. ${starter.displayName} opens set ${upcomingSet}.`,
+      starterIndex,
+      `${summary} ${starter.displayName} opens set ${upcomingSet}.`,
     );
   }
 
-  private startSet(match: PazaakMatch, incrementSetNumber: boolean, statusLine: string): PazaakMatch {
+  private startSet(
+    match: PazaakMatch,
+    incrementSetNumber: boolean,
+    starterIndex: number,
+    statusLine: string,
+  ): PazaakMatch {
     if (incrementSetNumber) {
       match.setNumber += 1;
     }
@@ -584,7 +867,7 @@ export class PazaakCoordinator {
     match.mainDeck = buildMainDeck();
     match.pendingDraw = null;
     match.phase = "turn";
-    match.activePlayerIndex = (match.setNumber - 1) % 2;
+    match.activePlayerIndex = starterIndex;
     match.statusLine = statusLine;
     match.updatedAt = Date.now();
     match.turnStartedAt = Date.now();

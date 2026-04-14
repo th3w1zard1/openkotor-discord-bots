@@ -26,6 +26,11 @@ import {
   getSideCardOptionsForPlayer,
   renderBoardLine,
   renderHandLine,
+  HAND_SIZE,
+  SETS_TO_WIN,
+  MAX_BOARD_SIZE,
+  WIN_SCORE,
+  SIDE_DECK_SIZE,
   type PazaakMatch,
   type PendingChallenge,
 } from "./pazaak.js";
@@ -100,9 +105,10 @@ const buildRulesEmbed = () => {
       {
         name: "Match Flow",
         value: asBulletList([
-          "Each match is first to 3 sets.",
-          "Each set aims to get closer to 20 without going over.",
-          "A tie starts another set without refreshing side cards.",
+          `Each match is first to ${SETS_TO_WIN} sets.`,
+          `Each set aims to get closer to ${WIN_SCORE} without going over.`,
+          "A tie starts another set with fresh side cards — unless one player has a Tiebreaker card.",
+          "The loser of a set goes first in the next set. On a tie, the coin-flip opener resumes.",
         ]),
         inline: false,
       },
@@ -110,17 +116,19 @@ const buildRulesEmbed = () => {
         name: "Decks",
         value: asBulletList([
           "The main deck contains four copies of cards 1 through 10.",
-          "Each player gets 4 random side cards for the entire match.",
-          "Each side card can only be used once per match.",
+          `Each player gets a ${SIDE_DECK_SIZE}-card sideboard at match start.`,
+          `${HAND_SIZE} side cards are drawn from the sideboard each set.`,
+          "Side cards include fixed (+/−), flip (±), Tiebreaker, x2 Double, and board-flip specials.",
         ]),
         inline: false,
       },
       {
         name: "Turns",
         value: asBulletList([
-          "On your turn, draw or stand.",
-          "After a draw, you may play one side card or bank the total.",
-          "If you end a turn over 20, you bust and lose the set.",
+          "On your turn, you must draw from the main deck first.",
+          `If the draw puts you over ${WIN_SCORE}, you bust and lose the set immediately.`,
+          "If you don't bust, you may play one side card, then stand or end the turn.",
+          `Filling all ${MAX_BOARD_SIZE} board slots without busting wins the set automatically.`,
         ]),
         inline: false,
       },
@@ -339,15 +347,29 @@ const buildPrivateControlsPayload = async (match: PazaakMatch, userId: string) =
   } else if (currentPlayer.userId !== userId) {
     description = `${description}\n\n${opponent.displayName} is holding the turn right now. Try not to look shocked.`;
   } else if (match.phase === "turn") {
-    description = `${description}\n\nIt is your move. Draw from the main deck or stand on ${player.total}.`;
+    description = `${description}\n\nIt is your move. Draw from the main deck.`;
     components.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(`deadeye:draw:${match.id}`).setLabel("Draw").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`deadeye:stand:${match.id}`).setLabel("Stand").setStyle(ButtonStyle.Secondary),
+      ),
+    );
+  } else if (match.phase === "after-card") {
+    description = `${description}\n\n${match.statusLine} Stand on ${player.total} or end the turn.`;
+
+    components.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`deadeye:endturn:${match.id}`)
+          .setLabel("End Turn")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`deadeye:stand:${match.id}`)
+          .setLabel("Stand")
+          .setStyle(ButtonStyle.Secondary),
       ),
     );
   } else {
-    description = `${description}\n\nYou drew ${match.pendingDraw}. Play one side card if you want, or end the turn as-is.`;
+    description = `${description}\n\nYou drew ${match.pendingDraw}. Play a side card, stand on ${player.total}, or end the turn.`;
 
     const sideCardButtons = getSideCardOptionsForPlayer(player).map((option) => {
       return new ButtonBuilder()
@@ -361,6 +383,10 @@ const buildPrivateControlsPayload = async (match: PazaakMatch, userId: string) =
         new ButtonBuilder()
           .setCustomId(`deadeye:endturn:${match.id}`)
           .setLabel("End Turn")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`deadeye:stand:${match.id}`)
+          .setLabel("Stand")
           .setStyle(ButtonStyle.Secondary),
       ),
     );
