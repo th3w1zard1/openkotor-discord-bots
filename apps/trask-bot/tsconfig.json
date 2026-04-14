@@ -1,0 +1,29 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "references": [
+    {
+      "path": "../../packages/config"
+    },
+    {
+      "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/discord-ui"
+    },
+    {
+      "path": "../../packages/personas"
+    },
+    {
+      "path": "../../packages/retrieval"
+    }
+  ],
+  "include": [
+    "src/**/*.ts"
+  ]
+}
