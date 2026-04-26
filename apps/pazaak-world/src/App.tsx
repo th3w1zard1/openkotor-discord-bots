@@ -172,18 +172,42 @@ const formatVendorDifficultyLabel = (difficulty: LocalOpponentProfile["vendorDif
 
 const DEFAULT_USER_SETTINGS: PazaakUserSettings = {
   theme: "kotor",
+  tableTheme: "ebon-hawk",
+  cardBackStyle: "classic",
+  tableAmbience: "cantina",
   soundEnabled: false,
+  soundTheme: "default",
   reducedMotionEnabled: false,
   turnTimerSeconds: 45,
   preferredAiDifficulty: "professional",
+  confirmForfeit: true,
+  highlightValidPlays: true,
+  focusMode: false,
+  showRatingsInGame: true,
+  showGuildEmblems: true,
+  showHolocronStreaks: true,
+  showPostMatchDebrief: true,
+  chatAudience: "everyone",
 };
 
 const areUserSettingsEqual = (left: PazaakUserSettings, right: PazaakUserSettings): boolean => {
   return left.theme === right.theme
+    && left.tableTheme === right.tableTheme
+    && left.cardBackStyle === right.cardBackStyle
+    && left.tableAmbience === right.tableAmbience
     && left.soundEnabled === right.soundEnabled
+    && left.soundTheme === right.soundTheme
     && left.reducedMotionEnabled === right.reducedMotionEnabled
     && left.turnTimerSeconds === right.turnTimerSeconds
-    && left.preferredAiDifficulty === right.preferredAiDifficulty;
+    && left.preferredAiDifficulty === right.preferredAiDifficulty
+    && left.confirmForfeit === right.confirmForfeit
+    && left.highlightValidPlays === right.highlightValidPlays
+    && left.focusMode === right.focusMode
+    && left.showRatingsInGame === right.showRatingsInGame
+    && left.showGuildEmblems === right.showGuildEmblems
+    && left.showHolocronStreaks === right.showHolocronStreaks
+    && left.showPostMatchDebrief === right.showPostMatchDebrief
+    && left.chatAudience === right.chatAudience;
 };
 
 function ProviderMark({ provider }: { provider: SocialAuthProvider }) {
