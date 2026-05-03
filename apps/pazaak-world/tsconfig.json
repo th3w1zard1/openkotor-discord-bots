@@ -1,7 +1,9 @@
 {
   "files": [],
   "references": [
+    { "path": "../../packages/blackjack-engine" },
     { "path": "../../packages/pazaak-engine" },
+    { "path": "../../packages/platform" },
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" }
   ]
