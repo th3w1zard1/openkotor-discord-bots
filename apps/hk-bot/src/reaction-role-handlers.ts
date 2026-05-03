@@ -31,7 +31,10 @@ const lastReplyAt = new Map<string, number>();
 
 const replyCooldownKey = (messageId: string, userId: string): string => `${messageId}:${userId}`;
 
-const resolveTargetRole = async (guild: Guild, mapping: { roleId?: string; curatedRoleId?: string }): Promise<Role | null> => {
+const resolveTargetRole = async (
+  guild: Guild,
+  mapping: { roleId?: string; curatedRoleId?: string; roleNameHint?: string },
+): Promise<Role | null> => {
   if (mapping.roleId) {
     const cached = guild.roles.cache.get(mapping.roleId);
 
@@ -44,20 +47,43 @@ const resolveTargetRole = async (guild: Guild, mapping: { roleId?: string; curat
 
   const curatedId = mapping.curatedRoleId;
 
-  if (!curatedId) {
+  if (curatedId) {
+    const def = findCuratedRoleById(curatedId);
+
+    if (!def) {
+      return null;
+    }
+
+    const exact = guild.roles.cache.find((r) => r.name === def.name);
+
+    if (exact) {
+      return exact;
+    }
+
+    const lower = def.name.toLowerCase();
+    return guild.roles.cache.find((r) => r.name.toLowerCase() === lower) ?? null;
+  }
+
+  const hint = mapping.roleNameHint?.trim();
+
+  if (!hint) {
     return null;
   }
 
-  const def = findCuratedRoleById(curatedId);
+  const exact = guild.roles.cache.find((r) => r.name === hint);
 
-  if (!def) {
-    return null;
+  if (exact) {
+    return exact;
   }
 
-  return guild.roles.cache.find((r) => r.name === def.name) ?? null;
+  const lower = hint.toLowerCase();
+  return guild.roles.cache.find((r) => r.name.toLowerCase() === lower) ?? null;
 };
 
-const resolveRoleLabel = (mapping: { roleId?: string; curatedRoleId?: string }, role: Role | null): string => {
+const resolveRoleLabel = (
+  mapping: { roleId?: string; curatedRoleId?: string; roleNameHint?: string },
+  role: Role | null,
+): string => {
   if (role) {
     return role.name;
   }
@@ -68,7 +94,26 @@ const resolveRoleLabel = (mapping: { roleId?: string; curatedRoleId?: string }, 
     return def?.name ?? mapping.curatedRoleId;
   }
 
+  if (mapping.roleNameHint) {
+    return mapping.roleNameHint;
+  }
+
   return mapping.roleId ?? "unknown role";
+};
+
+/** Human-readable emoji for HK flavor text (custom → `:name:`, unicode as-is). */
+const reactionEmojiDisplay = (emojiKey: string): string => {
+  const colonIdx = emojiKey.lastIndexOf(":");
+
+  if (colonIdx > 0) {
+    const name = emojiKey.slice(0, colonIdx).trim();
+
+    if (name) {
+      return `:${name}:`;
+    }
+  }
+
+  return emojiKey || "that reaction";
 };
 
 const finalizeReaction = async (
@@ -94,6 +139,7 @@ const finalizeReaction = async (
 
   const emojiKey = discordEmojiKey(reaction.emoji);
   const mapping = findMappingForEmoji(panel, emojiKey);
+  const emojiLabel = reactionEmojiDisplay(emojiKey);
 
   if (!mapping) {
     return;
@@ -125,7 +171,10 @@ const finalizeReaction = async (
       cooldownMs: snapshot.replyCooldownMs,
       embed: buildWarningEmbed({
         title: "Designation Failure",
-        description: pickReactionErrorLine("missing", roleLabel),
+        description: pickReactionErrorLine("missing", roleLabel, {
+          displayName: member.displayName,
+          emojiLabel,
+        }),
       }),
       logger,
     });
@@ -153,7 +202,10 @@ const finalizeReaction = async (
       cooldownMs: snapshot.replyCooldownMs,
       embed: buildWarningEmbed({
         title: "Designation Failure",
-        description: pickReactionErrorLine("blocked", mutation.roleName),
+        description: pickReactionErrorLine("blocked", mutation.roleName, {
+          displayName: member.displayName,
+          emojiLabel,
+        }),
       }),
       logger,
     });
@@ -168,14 +220,20 @@ const finalizeReaction = async (
       cooldownMs: snapshot.replyCooldownMs,
       embed: buildSuccessEmbed({
         title: "Designation Update",
-        description: pickReactionNoopLine(direction, mutation.roleName),
+        description: pickReactionNoopLine(direction, mutation.roleName, {
+          displayName: member.displayName,
+          emojiLabel,
+        }),
       }),
       logger,
     });
     return;
   }
 
-  const line = pickReactionSuccessLine(direction, mutation.roleName, curatedDef);
+  const line = pickReactionSuccessLine(direction, mutation.roleName, curatedDef, {
+    displayName: member.displayName,
+    emojiLabel,
+  });
 
   await announceOutcome({
     panelAnnounceMode: panel.announceMode,

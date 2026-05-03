@@ -63,8 +63,8 @@ test("parseReactionRolePanelsJson parses panels and mappings", () => {
   assert.equal(panel.messageId, "222222222222222222");
   assert.equal(panel.announceMode, "silent");
   assert.equal(panel.mappings.length, 2);
-  assert.deepEqual(panel.mappings[0], { emojiKey: "✅", roleId: "333333333333333333" });
-  assert.deepEqual(panel.mappings[1], { emojiKey: "custom:444444444444444444", curatedRoleId: "reone" });
+  assert.deepEqual(panel.mappings[0], { emojiKeys: ["✅"], roleId: "333333333333333333" });
+  assert.deepEqual(panel.mappings[1], { emojiKeys: ["custom:444444444444444444"], curatedRoleId: "reone" });
 });
 
 test("parseReactionRolePanelsJson inherits default announce mode", () => {
@@ -79,4 +79,41 @@ test("parseReactionRolePanelsJson inherits default announce mode", () => {
   }`);
 
   assert.equal(snap.panels[0]!.announceMode, "reply");
+});
+
+test("parseReactionRolePanelsJson merges emoji and emojis with dedupe", () => {
+  const snap = parseReactionRolePanelsJson(`{
+    "panels": [
+      {
+        "channelId": "111111111111111111",
+        "messageId": "222222222222222222",
+        "mappings": [
+          {
+            "emoji": "🎮",
+            "emojis": ["🎮", "✅"],
+            "roleId": "333333333333333333"
+          }
+        ]
+      }
+    ]
+  }`);
+
+  assert.deepEqual(snap.panels[0]!.mappings[0]!.emojiKeys, ["🎮", "✅"]);
+});
+
+test("parseReactionRolePanelsJson accepts roleNameHint alone", () => {
+  const snap = parseReactionRolePanelsJson(`{
+    "panels": [
+      {
+        "channelId": "111111111111111111",
+        "messageId": "222222222222222222",
+        "mappings": [{ "emoji": "⭐", "roleNameHint": "Star Forge Regulars" }]
+      }
+    ]
+  }`);
+
+  assert.deepEqual(snap.panels[0]!.mappings[0], {
+    emojiKeys: ["⭐"],
+    roleNameHint: "Star Forge Regulars",
+  });
 });

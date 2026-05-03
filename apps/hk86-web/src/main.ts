@@ -1,6 +1,7 @@
 /** Same permission integers as `scripts/discord-install-links.ts` (install URLs). */
 const INSTALL_TRASK_PERMS = "84992";
-const INSTALL_HK_PERMS = "268454912";
+/** Matches `HK_REACTION_BOT_PERMISSIONS` in hk-bot (Manage Roles + reactions + slash, etc.). */
+const INSTALL_HK_PERMS = "2416266304";
 const INSTALL_PAZAAK_PERMS = "19456";
 
 function inviteHref(appId: string, permissions: string): string {
