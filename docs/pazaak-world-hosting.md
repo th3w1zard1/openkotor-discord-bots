@@ -22,6 +22,11 @@ This repository now supports a no-server baseline deployment pattern:
   - `infra/pazaak-matchmaking-worker/wrangler.toml`
   - `infra/pazaak-matchmaking-worker/src/index.ts`
   - `infra/pazaak-matchmaking-worker/README.md`
+- Discord Activity support on the Worker:
+  - `POST /api/auth/token` / `POST /api/token` for Activity OAuth code exchange.
+  - `wss://<worker>/relay/:instanceId` for lightweight Activity instance presence.
+  - The relay is intentionally non-authoritative; live Pazaak match actions still
+    flow through the embedded Pazaak bot API.
 - Worker deployment workflow:
   - `.github/workflows/pazaak-matchmaking-worker.yml`
 
@@ -38,6 +43,20 @@ Behavior:
 3. If all origins fail, existing offline practice paths remain usable.
 
 If `VITE_API_BASES` is unset, the client defaults to relative `/api`.
+
+Discord Activity token exchange can use a separate origin:
+
+- `VITE_ACTIVITY_TOKEN_BASE="https://pazaak-matchmaking.example.workers.dev"`
+
+If unset, the Activity auth flow uses the first `VITE_API_BASES` origin, then
+falls back to same-origin `/api/auth/token`.
+
+The optional Activity presence relay is configured separately:
+
+- `VITE_ACTIVITY_RELAY_URL="wss://pazaak-matchmaking.example.workers.dev/relay"`
+
+This is for Activity room presence and participant coordination only. Match
+state remains on the authoritative API/WebSocket origin from `VITE_API_BASES`.
 
 ## Operator console
 
@@ -64,8 +83,9 @@ PazaakWorld can run with three levels of backend support:
   actions, sideboards, wallets, lobbies, and Discord parity. Start it with `corepack pnpm
   dev:pazaak`.
 2. **Cloudflare Worker fallback**: free public auth/session/settings/queue/lobby support via
-  `infra/pazaak-matchmaking-worker`. It is suitable for sign-in, queue, and lobby continuity, but
-  intentionally does not run authoritative match simulation.
+  `infra/pazaak-matchmaking-worker`. It is suitable for sign-in, queue, lobby continuity, Discord
+  Activity token exchange, and Activity presence relay, but intentionally does not run authoritative
+  match simulation.
 3. **Static/offline mode**: no API target. The game remains playable through local practice, but
   shared accounts, lobbies, OAuth, and multiplayer queues are unavailable.
 

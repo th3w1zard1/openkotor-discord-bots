@@ -78,11 +78,13 @@ FIRECRAWL_API_KEY=         # optional — used by future ingest pipeline
 DATABASE_URL=              # optional — defaults to local file storage
 ```
 
-For Trask's current sidecar-backed `/ask` flow, also set:
+For Trask's headless GPT Researcher `/ask` flow (and Holocron Q&A), create a Python venv with
+`vendor/ai-researchwizard/requirements.txt` — see **`scripts/bootstrap_trask_gpt_researcher.ps1`** /
+**`scripts/bootstrap_trask_gpt_researcher.sh`** and [docs/trask.md](trask.md) — then set:
 
 ```
-TRASK_RESEARCHWIZARD_BASE_URL=http://localhost:8000
-TRASK_RESEARCHWIZARD_API_KEY=   # optional, only if your sidecar is protected
+TRASK_GPT_RESEARCHER_ROOT=vendor/ai-researchwizard
+TRASK_GPT_RESEARCHER_PYTHON=.venv-trask-gptr/Scripts/python.exe   # or bin/python on Unix
 TRASK_RESEARCHWIZARD_TIMEOUT_MS=120000
 ```
 

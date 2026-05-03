@@ -53,7 +53,14 @@ Private Activity lobbies can override the sideboard policy at table creation:
 - `Each player active custom`: each human ready seat must have an active saved custom sideboard.
 - `Host mirrored custom`: both ready seats use the host's active saved custom sideboard.
 
-Side cards include the currently implemented TSL-confirmed subset:
+### Game modes
+
+Player-facing copy for cards, strategy, deck limits, and bust probability is centralized in **`PAZAAK_RULEBOOK`** (`packages/pazaak-engine/src/rules.ts`).
+
+- **Canonical** — Matchmaking, ranked tables, and wagered Discord challenges stay on TSL-verified cards only. Custom decks containing Wacky-only tokens fail validation.
+- **Wacky** — Adds `%3`–`%6` (mod previous), `/2` (halve previous), and `00` (hard reset). Private casual lobbies (Discord `/pazaak lobby action:create mode:wacky` or Activity lobby UI with Ranked off) pass `gameMode: "wacky"` into `createDirectMatch`.
+
+Side cards include the TSL-confirmed subset plus optional Wacky specials:
 
 | Type | Variants | Behavior |
 |---|---|---|
@@ -65,6 +72,9 @@ Side cards include the currently implemented TSL-confirmed subset:
 | Tiebreaker (`±1T` / `TT`) | Special | Player chooses `+1` or `-1`; wins tied sets |
 | Flip 2&4 (`F1`) | Special | Occupies a board slot with value `0`, then flips the sign of all main-deck, plus, and minus 2s and 4s on the board |
 | Flip 3&6 (`F2`) | Special | Occupies a board slot with value `0`, then flips the sign of positive 3s and 6s already on the board |
+| Mod previous (`%3`…`%6`) | Wacky | Replaces the previous board card with Python-style non-negative remainder modulo N |
+| Halve previous (`/2`) | Wacky | Replaces the previous board card with `trunc(prev / 2)` (toward zero) |
+| Hard reset (`00`) | Wacky | Places `0`, forces an immediate set tie, advances consecutive-tie counter |
 
 ### Turn Flow
 
@@ -150,7 +160,48 @@ away from the ephemeral slash-command panel.
 
 ### `/pazaak rules`
 
-Displays the current pazaak ruleset embed.
+Paginated rulebook embed backed by `PAZAAK_RULEBOOK`.
+
+**Options:**
+| Option | Required | Description |
+|---|---|---|
+| `section` | no | Jump to `Basics`, `Cards`, `Strategy`, `Game Modes`, or `Tournaments` |
+
+A select menu on the message switches sections without re-running the command.
+
+---
+
+### `/pazaak card`
+
+**Options:**
+| Option | Required | Description |
+|---|---|---|
+| `token` | yes | Side-deck token to describe (`+2`, `*4`, `$$`, `%5`, `/2`, …) |
+
+Ephemeral response with rarity, copy limit, mechanic, coaching note, and TSL notes when present.
+
+---
+
+### `/pazaak strategy`
+
+**Options:**
+| Option | Required | Description |
+|---|---|---|
+| `total` | no | Highlight this board total (0–20) on the bust probability chart |
+
+Ephemeral primer with doctrine excerpts and the uniform-shoe bust table used by the advisor UI.
+
+---
+
+### `/pazaak tournament`
+
+Bracket lifecycle commands (`create`, `join`, `leave`, `list`, `start`, `bracket`, `standings`, `report`, `cancel`). Matches auto-schedule through `PazaakCoordinator`; settlement feeds `advanceTournament`. Admin overrides: `/pazaak-admin tournament force-report|reseed`.
+
+---
+
+### `/pazaak lobby`
+
+Cross-platform lobby helper (`list`, `create`, `join`, `ready`, `leave`, `add_ai`, `start`). **`mode`** on `create` chooses `canonical` (default) or `wacky` (casual experimental cards, ranked off).
 
 ---
 

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HK-86 — Reaction roles</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="hero">
+        <p class="eyebrow">OpenKOTOR · Discord bots</p>
+        <h1>HK-86</h1>
+        <p class="lede">
+          Static operator page for the HK-themed reaction-role panels bot. No matchmaking, no backend — configure the bot with JSON on the host and use Discord for everything else.
+        </p>
+      </header>
+
+      <main class="grid">
+        <section class="card" aria-labelledby="invite-title">
+          <h2 id="invite-title">Add the bot</h2>
+          <p class="muted">
+            Pre-filled OAuth link uses the same permission integer as the bot embeds (<code id="perm-int"></code>).
+          </p>
+          <p id="invite-missing" class="callout warn hidden">
+            Set <code>VITE_DISCORD_APPLICATION_ID</code> at build time (or GitHub Actions variable <code>HK86_DISCORD_APP_ID</code>) so the invite button can be generated.
+          </p>
+          <p class="actions">
+            <a id="invite-link" class="btn primary hidden" href="#" rel="noopener noreferrer">Invite HK-86</a>
+          </p>
+        </section>
+
+        <section class="card" aria-labelledby="docs-title">
+          <h2 id="docs-title">Documentation</h2>
+          <ul class="links">
+            <li><a id="guide-link" href="#">HK-86 guide (repo)</a></li>
+            <li><a id="example-json-link" href="#">Example reaction panels JSON</a></li>
+          </ul>
+        </section>
+
+        <section class="card wide" aria-labelledby="flow-title">
+          <h2 id="flow-title">Operator checklist</h2>
+          <ol class="steps">
+            <li>Create panels JSON on the bot host and point <code>HK_REACTION_ROLE_PANELS_PATH</code> at it (hot reload supported).</li>
+            <li>Run <code>/designations reactions help</code> in Discord for the full setup embed.</li>
+            <li>Use <code>/designations reactions status</code> (Manage Server) to verify the bot sees your config.</li>
+          </ol>
+        </section>
+      </main>
+
+      <footer class="foot">
+        <span>Served from GitHub Pages under <code>/bots/hk86/</code>.</span>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -434,6 +434,8 @@ export interface SourceIndexRecord {
   tags: readonly string[];
 }
 
+type SerializableValue = object | string | number | boolean | null;
+
 export class FileChunkStore {
   public constructor(private readonly stateDir: string) {}
 
@@ -449,7 +451,7 @@ export class FileChunkStore {
     return path.join(this.sourceDir(sourceId), "_index.json");
   }
 
-  private async writeJsonAtomic(filePath: string, payload: unknown): Promise<void> {
+  private async writeJsonAtomic(filePath: string, payload: SerializableValue): Promise<void> {
     const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
     await writeFile(tempPath, JSON.stringify(payload, null, 2), "utf8");
     await rename(tempPath, filePath);

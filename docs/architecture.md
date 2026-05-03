@@ -18,15 +18,15 @@ Purpose: guild-first KOTOR q&a and troubleshooting.
 
 Commands: `/ask`, `/sources`, `/queue-reindex`.
 
-Current implementation: `/ask` forwards the user query to an `ai-researchwizard`
-sidecar via HTTP, pins the request to this repo's hardcoded approved source list, and
-renders the returned report into a Discord-native briefing with inline numeric citations
-plus a compact `Sources` block. `/sources` remains as an admin-facing policy inspection
-command. `/queue-reindex` remains an operational ingest hook.
+Current implementation: `/ask` runs the vendored **headless GPT Researcher** Python entrypoint
+(`trask_headless_research.py`, same library as upstream `cli.py`), pins the request to this repo's
+hardcoded approved source list, and renders the returned report into a Discord-native briefing with
+inline numeric citations plus a compact `Sources` block. `/sources` remains as an admin-facing policy
+inspection command. `/queue-reindex` remains an operational ingest hook.
 
-Config prefix: `TRASK_*`. Reads `TRASK_ALLOWED_GUILD_IDS` and `TRASK_APPROVED_CHANNEL_IDS` for
-scope restrictions, plus `TRASK_RESEARCHWIZARD_BASE_URL`, `TRASK_RESEARCHWIZARD_API_KEY`,
-and `TRASK_RESEARCHWIZARD_TIMEOUT_MS` for the vendor-backed answer path.
+Config prefix: `TRASK_*`. Reads `TRASK_ALLOWED_GUILD_IDS` and `TRASK_APPROVED_CHANNEL_IDS` for scope
+restrictions, plus `TRASK_GPT_RESEARCHER_ROOT`, `TRASK_GPT_RESEARCHER_PYTHON`, optional
+`TRASK_GPT_RESEARCHER_SCRIPT`, and `TRASK_RESEARCHWIZARD_TIMEOUT_MS` for the research subprocess.
 
 Next phase: tighten the vendor adapter contract, normalize source metadata further, and decide
 whether ingest-worker remains a secondary indexing path or becomes maintainer-only infrastructure.
