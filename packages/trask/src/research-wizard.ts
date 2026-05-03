@@ -15,9 +15,19 @@ export interface ResearchWizardBriefAnswer extends ResearchWizardAnswer {
   researchReport: string;
 }
 
+/** Fine-grained phases for Holocron clients polling thread history. */
+export interface ResearchWizardProgressEvent {
+  phase: "gather" | "report" | "sources" | "compose";
+  detail?: string;
+  sources?: readonly SourceDescriptor[];
+}
+
 /** Structural type for adapters that only need full Q&A (e.g. Trask HTTP `/ask`). */
 export interface ResearchWizardQueryHandler {
-  answerQuestion(query: string): Promise<ResearchWizardAnswer>;
+  answerQuestion(
+    query: string,
+    onProgress?: (event: ResearchWizardProgressEvent) => void,
+  ): Promise<ResearchWizardAnswer>;
 }
 
 interface ResearchWizardResponsePayload {
@@ -390,9 +400,29 @@ export class ResearchWizardClient implements ResearchWizardQueryHandler {
     return { report, payload };
   }
 
-  public async answerQuestion(query: string): Promise<ResearchWizardAnswer> {
+  public async answerQuestion(
+    query: string,
+    onProgress?: (event: ResearchWizardProgressEvent) => void,
+  ): Promise<ResearchWizardAnswer> {
+    onProgress?.({
+      phase: "gather",
+      detail: "Scanning approved archives and open-web context…",
+    });
     const { report, payload } = await this.fetchResearchReport(query, buildCustomPrompt());
+    onProgress?.({
+      phase: "report",
+      detail: "Ranking passages and citations…",
+    });
     const relevantSources = collectRelevantSources(report, this.approvedSources, payload);
+    onProgress?.({
+      phase: "sources",
+      detail: relevantSources.length ? `${relevantSources.length} sources matched` : "Mapping hosts to archive catalog…",
+      sources: relevantSources,
+    });
+    onProgress?.({
+      phase: "compose",
+      detail: "Rendering Holocron answer…",
+    });
     const answer = await this.rewriteForDiscord(query, report, relevantSources);
 
     return {
