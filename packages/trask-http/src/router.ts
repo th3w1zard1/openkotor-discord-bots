@@ -2,13 +2,18 @@ import { randomUUID } from "node:crypto";
 
 
 
-import type { JsonTraskQueryRepository, TraskQueryRecord } from "@openkotor/persistence";
+import type {
+  JsonTraskQueryRepository,
+  TraskQueryLiveEvent,
+  TraskQueryRecord,
+  TraskSourceRecord,
+} from "@openkotor/persistence";
 
 import { normalizeAuthHandlerError, type AuthHandlerThrown } from "@openkotor/platform/auth";
 
 import type { SearchProvider } from "@openkotor/retrieval";
 
-import type { ResearchWizardQueryHandler } from "@openkotor/trask";
+import type { ResearchWizardProgressEvent, ResearchWizardQueryHandler } from "@openkotor/trask";
 
 import { Router, type Request, type Response, type RequestHandler } from "express";
 
@@ -157,12 +162,47 @@ const readOptionalHttpStatus = (e: AuthHandlerThrown): number | undefined => {
 
 
 const mapTraskQueryRecord = (record: TraskQueryRecord): TraskQueryRecord => ({
-
   ...record,
-
   sources: record.sources.map((source) => ({ ...source })),
-
+  ...(record.liveTrace
+    ? {
+        liveTrace: record.liveTrace.map((ev) => ({
+          ...ev,
+          ...(ev.sources ? { sources: ev.sources.map((s) => ({ ...s })) } : {}),
+        })),
+      }
+    : {}),
 });
+
+const mapDescriptorsToSourceRecords = (
+  sources: ResearchWizardProgressEvent["sources"],
+): readonly TraskSourceRecord[] => {
+  if (!sources?.length) return [];
+  return sources.map((s) => ({
+    id: s.id,
+    name: s.name,
+    url: s.homeUrl,
+  }));
+};
+
+const appendLiveTrace = async (
+  repository: JsonTraskQueryRepository,
+  queryId: string,
+  event: Omit<TraskQueryLiveEvent, "at"> & { at?: string },
+): Promise<void> => {
+  const prev = await repository.getByQueryId(queryId);
+  if (!prev) return;
+  const row: TraskQueryLiveEvent = {
+    at: event.at ?? new Date().toISOString(),
+    phase: event.phase,
+    ...(event.detail !== undefined ? { detail: event.detail } : {}),
+    ...(event.sources?.length ? { sources: event.sources.map((s) => ({ ...s })) } : {}),
+  };
+  await repository.upsert({
+    ...prev,
+    liveTrace: [...(prev.liveTrace ?? []), row],
+  });
+};
 
 
 
@@ -454,93 +494,131 @@ export const createTraskHttpRouter = <TUser extends TraskHttpUser = TraskHttpUse
 
       const createdAt = new Date().toISOString();
 
+      if (!persist) {
+        try {
+          const result = await trask.researchWizard.answerQuestion(query);
 
+          const record: TraskQueryRecord = {
+            queryId,
+            threadId,
+            userId: user.id,
+            query,
+            status: "complete",
+            answer: result.answer,
+            sources: result.approvedSources.map((source) => ({
+              id: source.id,
+              name: source.name,
+              url: source.homeUrl,
+            })),
+            error: null,
+            createdAt,
+            completedAt: new Date().toISOString(),
+          };
 
-      try {
+          res.status(201).json({ query: mapTraskQueryRecord(record) });
+        } catch (err) {
+          const e = err as AuthHandlerThrown;
 
-        const result = await trask.researchWizard.answerQuestion(query);
+          const status = readOptionalHttpStatus(e) ?? 502;
 
-        const record: TraskQueryRecord = {
+          const message = e instanceof Error ? e.message : String(e);
 
-          queryId,
+          const record: TraskQueryRecord = {
+            queryId,
+            threadId,
+            userId: user.id,
+            query,
+            status: "failed",
+            answer: null,
+            sources: [],
+            error: message,
+            createdAt,
+            completedAt: new Date().toISOString(),
+          };
 
-          threadId,
-
-          userId: user.id,
-
-          query,
-
-          status: "complete",
-
-          answer: result.answer,
-
-          sources: result.approvedSources.map((source) => ({
-
-            id: source.id,
-
-            name: source.name,
-
-            url: source.homeUrl,
-
-          })),
-
-          error: null,
-
-          createdAt,
-
-          completedAt: new Date().toISOString(),
-
-        };
-
-        if (persist) {
-
-          await trask.queryRepository.append(record);
-
+          res.status(status).json({ error: message, query: mapTraskQueryRecord(record) });
         }
 
-        res.status(201).json({ query: mapTraskQueryRecord(record) });
-
-      } catch (err) {
-
-        const e = err as AuthHandlerThrown;
-
-        const status = readOptionalHttpStatus(e) ?? 502;
-
-        const message = e instanceof Error ? e.message : String(e);
-
-        const record: TraskQueryRecord = {
-
-          queryId,
-
-          threadId,
-
-          userId: user.id,
-
-          query,
-
-          status: "failed",
-
-          answer: null,
-
-          sources: [],
-
-          error: message,
-
-          createdAt,
-
-          completedAt: new Date().toISOString(),
-
-        };
-
-        if (persist) {
-
-          await trask.queryRepository.append(record);
-
-        }
-
-        res.status(status).json({ error: message, query: mapTraskQueryRecord(record) });
-
+        return;
       }
+
+      const pendingRecord: TraskQueryRecord = {
+        queryId,
+        threadId,
+        userId: user.id,
+        query,
+        status: "pending",
+        answer: null,
+        sources: [],
+        error: null,
+        createdAt,
+        completedAt: null,
+        liveTrace: [
+          {
+            at: createdAt,
+            phase: "queued",
+            detail: "Holocron retrieval queued…",
+          },
+        ],
+      };
+
+      await trask.queryRepository.upsert(pendingRecord);
+
+      res.status(202).json({ query: mapTraskQueryRecord(pendingRecord) });
+
+      void (async () => {
+        try {
+          const result = await trask.researchWizard.answerQuestion(query, async (ev) => {
+            await appendLiveTrace(trask.queryRepository, queryId, {
+              phase: ev.phase,
+              ...(ev.detail !== undefined ? { detail: ev.detail } : {}),
+              ...(ev.sources?.length ? { sources: mapDescriptorsToSourceRecords(ev.sources) } : {}),
+            });
+          });
+
+          const prev = await trask.queryRepository.getByQueryId(queryId);
+
+          if (!prev) return;
+
+          const completeRecord: TraskQueryRecord = {
+            ...prev,
+            status: "complete",
+            answer: result.answer,
+            sources: result.approvedSources.map((source) => ({
+              id: source.id,
+              name: source.name,
+              url: source.homeUrl,
+            })),
+            error: null,
+            completedAt: new Date().toISOString(),
+          };
+
+          await trask.queryRepository.upsert(completeRecord);
+        } catch (err) {
+          const e = err as AuthHandlerThrown;
+
+          const status = readOptionalHttpStatus(e) ?? 502;
+
+          const message = e instanceof Error ? e.message : String(e);
+
+          const prev = await trask.queryRepository.getByQueryId(queryId);
+
+          if (!prev) return;
+
+          const failedRecord: TraskQueryRecord = {
+            ...prev,
+            status: "failed",
+            answer: null,
+            sources: [],
+            error: message,
+            completedAt: new Date().toISOString(),
+          };
+
+          await trask.queryRepository.upsert(failedRecord);
+
+          void status;
+        }
+      })();
 
     }),
 
