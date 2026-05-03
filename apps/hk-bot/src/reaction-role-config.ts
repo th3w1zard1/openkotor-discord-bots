@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, watchFile } from "node:fs";
 
 import type { Logger } from "@openkotor/core";
 
@@ -8,9 +8,12 @@ type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
 export interface ParsedReactionMapping {
-  emojiKey: string;
+  /** One or more normalized emoji keys (unicode literal or custom `name:snowflake`). */
+  emojiKeys: readonly string[];
   roleId?: string;
   curatedRoleId?: string;
+  /** Resolve a guild role by exact Discord role name (trimmed). Case-insensitive fallback if no exact match. */
+  roleNameHint?: string;
 }
 
 export interface ParsedReactionPanel {
@@ -72,8 +75,10 @@ export const normalizeConfigEmoji = (
 
 interface RawMapping {
   emoji?: JsonValue;
+  emojis?: JsonValue;
   roleId?: JsonValue;
   curatedRoleId?: JsonValue;
+  roleNameHint?: JsonValue;
 }
 
 interface RawPanel {
@@ -164,41 +169,72 @@ export const parseReactionRolePanelsJson = (
     const mappings: ParsedReactionMapping[] = [];
 
     for (const m of entry.mappings as RawMapping[]) {
-      if (typeof m?.emoji !== "string") {
-        logger?.warn("Skipping mapping: emoji must be a string.", { channelId: entry.channelId });
-        continue;
+      const emojiRawList: JsonValue[] = [];
+
+      if (m?.emoji !== undefined && m?.emoji !== null) {
+        emojiRawList.push(m.emoji as JsonValue);
       }
 
-      const normalized = normalizeConfigEmoji(m.emoji);
-
-      if (!normalized.ok) {
-        logger?.warn(`Skipping mapping: ${normalized.reason}`, { emoji: m.emoji });
-        continue;
+      if (Array.isArray(m?.emojis)) {
+        emojiRawList.push(...(m.emojis as JsonValue[]));
       }
 
-      const roleId = m.roleId !== undefined && m.roleId !== null ? String(m.roleId) : undefined;
-      const curatedRoleId =
-        m.curatedRoleId !== undefined && m.curatedRoleId !== null ? String(m.curatedRoleId) : undefined;
+      const emojiKeys: string[] = [];
 
-      const hasRole = roleId !== undefined && roleId.length > 0;
-      const hasCurated = curatedRoleId !== undefined && curatedRoleId.length > 0;
+      for (const rawEmoji of emojiRawList) {
+        if (typeof rawEmoji !== "string") {
+          logger?.warn("Skipping emoji entry: must be a string.", { channelId: entry.channelId, rawEmoji });
+          continue;
+        }
 
-      if (hasRole === hasCurated) {
-        logger?.warn("Skipping mapping: provide exactly one of roleId or curatedRoleId.", {
-          emoji: normalized.key,
+        const normalized = normalizeConfigEmoji(rawEmoji);
+
+        if (!normalized.ok) {
+          logger?.warn(`Skipping emoji: ${normalized.reason}`, { emoji: rawEmoji });
+          continue;
+        }
+
+        if (!emojiKeys.includes(normalized.key)) {
+          emojiKeys.push(normalized.key);
+        }
+      }
+
+      if (emojiKeys.length === 0) {
+        logger?.warn("Skipping mapping: provide `emoji` (string) and/or `emojis` (string[]) with at least one valid emoji.", {
+          channelId: entry.channelId,
         });
         continue;
       }
 
+      const roleId = m.roleId !== undefined && m.roleId !== null ? String(m.roleId).trim() : undefined;
+      const curatedRoleId =
+        m.curatedRoleId !== undefined && m.curatedRoleId !== null ? String(m.curatedRoleId).trim() : undefined;
+      const roleNameHint =
+        m.roleNameHint !== undefined && m.roleNameHint !== null ? String(m.roleNameHint).trim() : undefined;
+
+      const hasRole = roleId !== undefined && roleId.length > 0;
+      const hasCurated = curatedRoleId !== undefined && curatedRoleId.length > 0;
+      const hasHint = roleNameHint !== undefined && roleNameHint.length > 0;
+      const modeCount = [hasRole, hasCurated, hasHint].filter(Boolean).length;
+
+      if (modeCount !== 1) {
+        logger?.warn(
+          "Skipping mapping: provide exactly one of roleId (snowflake), curatedRoleId (catalog id), or roleNameHint (guild role name).",
+          { emojiKeys },
+        );
+        continue;
+      }
+
       if (hasRole && roleId && !isSnowflake(roleId)) {
-        logger?.warn("Skipping mapping: roleId must be a snowflake.", { emoji: normalized.key });
+        logger?.warn("Skipping mapping: roleId must be a snowflake.", { emojiKeys });
         continue;
       }
 
       mappings.push({
-        emojiKey: normalized.key,
+        emojiKeys,
         ...(hasRole ? { roleId } : {}),
         ...(hasCurated ? { curatedRoleId } : {}),
+        ...(hasHint ? { roleNameHint } : {}),
       });
     }
 
@@ -229,7 +265,7 @@ export const findMappingForEmoji = (
   panel: ParsedReactionPanel,
   emojiKey: string,
 ): ParsedReactionMapping | undefined => {
-  return panel.mappings.find((m) => m.emojiKey === emojiKey);
+  return panel.mappings.find((m) => m.emojiKeys.includes(emojiKey));
 };
 
 /** Loads `reaction-role-panels.json` with mtime-based cache invalidation. */
@@ -245,7 +281,26 @@ export class ReactionRoleConfigLoader {
   constructor(
     private readonly filePath: string,
     private readonly logger: Logger,
-  ) {}
+    options?: { watchFileChanges?: boolean },
+  ) {
+    const watch = options?.watchFileChanges !== false;
+
+    if (watch) {
+      try {
+        watchFile(this.filePath, { interval: 1500 }, () => {
+          this.invalidateCache();
+          this.logger.debug("Reaction-role config file watch fired; cache invalidated.", {
+            path: this.filePath,
+          });
+        });
+      } catch (error) {
+        this.logger.warn("Could not watch reaction-role config path (falling back to mtime on events only).", {
+          path: this.filePath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
 
   /** Absolute path to `reaction-role-panels.json` as resolved at startup. */
   get configPath(): string {

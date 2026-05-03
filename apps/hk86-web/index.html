@@ -56,15 +56,15 @@
           <p id="hk-invite-missing" class="callout warn hidden">
             Set <code>VITE_HK_DISCORD_APPLICATION_ID</code> or <code>VITE_DISCORD_APPLICATION_ID</code> (or variable <code>HK86_DISCORD_APP_ID</code>) for the invite URL.
           </p>
-          <p class="perm-foot muted">Permissions: <code id="hk-perms"></code> (same as <code>scripts/discord-install-links.ts</code>).</p>
-          <p class="muted hk-note">
-            Reaction-panel-only installs use <code>2416266304</code>; run <code>/designations reactions help</code> in Discord for that OAuth link.
+          <p class="perm-foot muted">
+            Permissions: <code id="hk-perms"></code> — reaction-ready HK invite (Manage Roles, reactions, slash). Matches
+            <code>scripts/discord-install-links.ts</code>.
           </p>
           <details class="hk-details">
             <summary>Operator checklist (reaction panels)</summary>
             <ol class="steps">
               <li>
-                Put <code>reaction-role-panels.json</code> under the HK data directory (default <code>data/hk-bot/</code>; override with <code>HK_DATA_DIR</code>). Hot reload on file change.
+                Put <code>reaction-role-panels.json</code> under the HK data directory (default <code>data/hk-bot/</code>; override with <code>HK_DATA_DIR</code>). The bot watches the file — edits apply without restart.
               </li>
               <li>Run <code>/designations reactions help</code> in Discord for the full setup embed.</li>
               <li>Use <code>/designations reactions status</code> (Manage Server) to verify config.</li>
