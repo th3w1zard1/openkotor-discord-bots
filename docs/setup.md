@@ -323,6 +323,14 @@ corepack pnpm dev:pazaak-world
 
 The Vite dev server proxies `/api` and `/ws` to `localhost:4001` automatically.
 
+**Nakama (authoritative Pazaak):** To run matches against the bundled Nakama runtime instead of the
+bot’s embedded HTTP/WebSocket API, start Postgres + Nakama (`pnpm dev:pazaak-nakama` or
+`docker compose -f infra/nakama/docker-compose.yml up` after `pnpm build:pazaak-nakama`), then run
+`pnpm dev:pazaak-world` with client env from `infra/nakama/README.md` (`VITE_PAZAAK_BACKEND=nakama`,
+`VITE_NAKAMA_HOST`, etc.). Gameplay talks to Nakama on port **7350** directly from the browser;
+keep the bot on **4001** if you still need OAuth (`/api/auth/token`) or Trask (`/api/trask/*`), and
+set `VITE_LEGACY_HTTP_ORIGIN=http://localhost:4001` so those routes keep working.
+
 ### 4. Build the Activity for Production
 
 ```bash
