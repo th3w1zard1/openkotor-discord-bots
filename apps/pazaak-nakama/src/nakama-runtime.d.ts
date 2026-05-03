@@ -12,9 +12,22 @@ declare namespace nkruntime {
     error(message: string, ...args: unknown[]): void;
   }
 
+  interface MatchmakerResult {
+    presence: Presence;
+    properties?: Record<string, unknown>;
+  }
+
+  type MatchmakerMatchedFunction = (
+    ctx: Context,
+    logger: Logger,
+    nk: Nakama,
+    matches: MatchmakerResult[],
+  ) => string;
+
   interface Initializer {
     registerRpc(id: string, fn: RpcFunction): void;
     registerMatch(name: string, handler: MatchHandler<any>): void;
+    registerMatchmakerMatched(fn: MatchmakerMatchedFunction): void;
     registerAfterAuthenticateCustom?(fn: unknown): void;
   }
 
@@ -52,6 +65,8 @@ declare namespace nkruntime {
       expiry?: number,
     ): LeaderboardRecords;
     matchCreate(ctx: Context, module: string, params?: Record<string, string>): string;
+    /** Relay an out-of-band message into an authoritative match (invokes matchSignal on the handler). */
+    matchSignal(ctx: Context, matchId: string, data: string): void;
   }
 
   interface Account {

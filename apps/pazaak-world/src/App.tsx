@@ -58,6 +58,8 @@ import {
   sendChatMessage,
   type ChatMessage,
   probeTraskAvailable,
+  bootstrapNakamaActivitySession,
+  isNakamaBackend,
 } from "./api.ts";
 import { GameBoard } from "./components/GameBoard.tsx";
 import { LocalBlackjackGame } from "./components/LocalBlackjackGame.tsx";
@@ -66,6 +68,7 @@ import { QuickSideboardSwitcher } from "./components/QuickSideboardSwitcher.tsx"
 import { SideboardWorkshop } from "./components/SideboardWorkshop.tsx";
 import { GlobalAccountCorner } from "./components/GlobalAccountCorner.tsx";
 import { CommunityBotsDashboard } from "./components/CommunityBotsDashboard.tsx";
+import { DiscordBotsHub } from "./components/DiscordBotsHub.tsx";
 import { TraskScreen } from "./components/TraskScreen.tsx";
 import { TournamentHub } from "./components/TournamentHub.tsx";
 import { HowToPlayPanel } from "./components/HowToPlayPanel.tsx";
@@ -392,22 +395,41 @@ const createLocalGuestSession = (): ActivitySession => {
   };
 };
 
+const maybeBootstrapNakama = async (session: ActivitySession): Promise<ActivitySession> => {
+  if (!isNakamaBackend()) return session;
+  return bootstrapNakamaActivitySession(session);
+};
+
 const PAZAAK_WORLD_PUBLIC_ROUTE = "/bots/pazaakworld";
+const DISCORD_BOTS_HUB_ROUTE = "/bots";
+
+const normalizePathname = (): string => window.location.pathname.replace(/\/+$/u, "") || "/";
 
 const isPazaakWorldRoute = (): boolean => {
   if (isDiscordActivity()) {
     return true;
   }
 
-  const pathname = window.location.pathname.replace(/\/+$/u, "") || "/";
+  const pathname = normalizePathname();
   return pathname === PAZAAK_WORLD_PUBLIC_ROUTE
     || pathname.startsWith(`${PAZAAK_WORLD_PUBLIC_ROUTE}/`)
     || pathname === "/pazaakworld"
     || pathname.startsWith("/pazaakworld/");
 };
 
+const isDiscordBotsHubRoute = (): boolean => {
+  const pathname = normalizePathname();
+  return pathname === DISCORD_BOTS_HUB_ROUTE || pathname === `${DISCORD_BOTS_HUB_ROUTE}/`;
+};
+
 export default function App() {
-  return isPazaakWorldRoute() ? <PazaakWorldApp /> : <CommunityBotsDashboard />;
+  if (isPazaakWorldRoute()) {
+    return <PazaakWorldApp />;
+  }
+  if (isDiscordBotsHubRoute()) {
+    return <DiscordBotsHub />;
+  }
+  return <CommunityBotsDashboard />;
 }
 
 // ---------------------------------------------------------------------------
@@ -752,7 +774,7 @@ function PazaakWorldApp() {
 
           if (oauthError) {
             clearOauthQuery();
-            const oauthGuest = createLocalGuestSession();
+            const oauthGuest = await maybeBootstrapNakama(createLocalGuestSession());
             setStoredStandaloneAuthToken(oauthGuest.accessToken);
             setAuthDialogMessage(decodeURIComponent(oauthError));
             setShowAuthDialog(true);
@@ -768,17 +790,18 @@ function PazaakWorldApp() {
               const sessionInfo = await fetchAuthSession(accessToken);
               const username = sessionInfo.account.displayName;
               const userId = sessionInfo.account.legacyGameUserId ?? sessionInfo.account.accountId;
-              const authSession: ActivitySession = {
+              let authSession: ActivitySession = {
                 userId,
                 username,
                 accessToken,
               };
+              authSession = await maybeBootstrapNakama(authSession);
 
-              setStoredStandaloneAuthToken(accessToken);
+              setStoredStandaloneAuthToken(authSession.accessToken);
               const requestedMatch = requestedMatchId
-                ? await fetchMatch(requestedMatchId, accessToken)
+                ? await fetchMatch(requestedMatchId, authSession.accessToken)
                 : null;
-              const match = requestedMatch ?? await fetchMyMatch(accessToken);
+              const match = requestedMatch ?? await fetchMyMatch(authSession.accessToken);
               routePostAuth(authSession, match);
               clearOauthQuery();
               return;
@@ -791,10 +814,10 @@ function PazaakWorldApp() {
           if (requestedMatchId) {
             try {
               // Try to fetch the match as a guest/spectator
-              const requestedMatch = await fetchMatch(requestedMatchId, "");
+              const spectateGuest = await maybeBootstrapNakama(createLocalGuestSession());
+              const requestedMatch = await fetchMatch(requestedMatchId, spectateGuest.accessToken);
               if (requestedMatch) {
-                const guestSession = createLocalGuestSession();
-                setState({ stage: "game", auth: guestSession, match: requestedMatch });
+                setState({ stage: "game", auth: spectateGuest, match: requestedMatch });
                 return;
               }
             } catch {
@@ -802,23 +825,22 @@ function PazaakWorldApp() {
             }
           }
 
-          const bootGuest = createLocalGuestSession();
+          const bootGuest = await maybeBootstrapNakama(createLocalGuestSession());
           setStoredStandaloneAuthToken(bootGuest.accessToken);
           routePostAuth(bootGuest, null);
           return;
         }
 
-        const auth = await initDiscordAuth();
-        const match = await fetchMyMatch(auth.accessToken);
-
-        const session: ActivitySession = {
-          userId: auth.userId,
-          username: auth.username,
-          accessToken: auth.accessToken,
-          ...(auth.instanceId ? { instanceId: auth.instanceId } : {}),
-          ...(auth.guildId ? { guildId: auth.guildId } : {}),
-          ...(auth.channelId ? { channelId: auth.channelId } : {}),
-        };
+        const discordRaw = await initDiscordAuth();
+        const session: ActivitySession = await maybeBootstrapNakama({
+          userId: discordRaw.userId,
+          username: discordRaw.username,
+          accessToken: discordRaw.accessToken,
+          ...(discordRaw.instanceId ? { instanceId: discordRaw.instanceId } : {}),
+          ...(discordRaw.guildId ? { guildId: discordRaw.guildId } : {}),
+          ...(discordRaw.channelId ? { channelId: discordRaw.channelId } : {}),
+        });
+        const match = await fetchMyMatch(session.accessToken);
 
         if (match) {
           setState({ stage: "game", auth: session, match });
@@ -828,7 +850,7 @@ function PazaakWorldApp() {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (!isDiscordActivity() && message.includes("not running inside Discord Activity")) {
-          const sdkGuest = createLocalGuestSession();
+          const sdkGuest = await maybeBootstrapNakama(createLocalGuestSession());
           setStoredStandaloneAuthToken(sdkGuest.accessToken);
           routePostAuth(sdkGuest, null);
           return;
@@ -853,15 +875,16 @@ function PazaakWorldApp() {
   useEffect(() => {
     if (state.stage !== "game") return;
     setChatMessages([]);
-    const unsubscribe = subscribeToMatch(state.match.id, handleMatchUpdate, {
+    const unsubscribe = subscribeToMatch(state.match.id, state.auth.accessToken, handleMatchUpdate, {
       reconnect: true,
+      nakamaMatchId: state.match.nakamaMatchId,
       onConnectionChange: setMatchSocketState,
       onChatMessage: (msg) => setChatMessages((prev) => [...prev, msg].slice(-100)),
     });
     return unsubscribe;
-    // Re-subscribe only when the match ID changes.
+    // Re-subscribe when the match or Nakama realtime id changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.stage === "game" ? state.match.id : null]);
+  }, [state.stage === "game" ? `${state.match.id}:${state.match.nakamaMatchId ?? ""}` : null, state.stage === "game" ? state.auth.accessToken : null]);
 
   const restoreFromWorkshop = useCallback(async (auth: ActivitySession, returnTo: "lobby" | "game") => {
     try {
@@ -1645,10 +1668,14 @@ function MatchmakingScreen({
       setBusy(true);
       setError(null);
       try {
-        await enqueueMatchmaking(accessToken, preferredMaxPlayers);
+        const { queue, match } = await enqueueMatchmaking(accessToken, preferredMaxPlayers);
         if (!active) return;
+        if (match) {
+          onEnterMatch(match);
+          return;
+        }
         setJoined(true);
-        setQueueLabel(`Queued for up to ${preferredMaxPlayers} players`);
+        setQueueLabel(queue ? `Queued for up to ${queue.preferredMaxPlayers} players` : `Queued for up to ${preferredMaxPlayers} players`);
       } catch (err) {
         if (!active) return;
         setError(err instanceof Error ? err.message : String(err));
@@ -1661,7 +1688,7 @@ function MatchmakingScreen({
     return () => {
       active = false;
     };
-  }, [accessToken, preferredMaxPlayers]);
+  }, [accessToken, preferredMaxPlayers, onEnterMatch]);
 
   useEffect(() => {
     if (!joined) return;
@@ -1672,6 +1699,7 @@ function MatchmakingScreen({
         const match = await fetchMyMatch(accessToken);
         if (!active) return;
         if (match) {
+          await leaveMatchmaking(accessToken);
           onEnterMatch(match);
           return;
         }
